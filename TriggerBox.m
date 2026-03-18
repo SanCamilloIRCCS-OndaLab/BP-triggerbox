@@ -35,6 +35,9 @@ classdef TriggerBox < handle
         handleOut
         handleIn
         bytesWritten
+        isOutOpen = false
+        isInOpen = false
+        isLibLoaded = false
     end
     
     properties (Constant, Access = private)
@@ -49,7 +52,12 @@ classdef TriggerBox < handle
         
         function obj = TriggerBox()
             % Load the library if not already loaded
-            obj.loadFTDLibrary()
+            if libisloaded(obj.LibName)
+                error('TriggerBox: library %s is already loaded, we imagine an instance of TriggerBox is already open. Call delete() on the existing instance first.', obj.LibName)
+            else
+                loadlibrary(obj.soLibPath, obj.hLibPath);
+            end
+            obj.isLibLoaded = true;
             
             % Register Brain Products vendor and product ID with libftd2xx
             % (not in the default FTDI vendor list, must be added explicitly)
@@ -64,6 +72,7 @@ classdef TriggerBox < handle
             if status ~= 0
                 error('TriggerBox: could not open output interface (status %d). Make sure ftdi_sio is not loaded.', status);
             end
+            obj.isOutOpen = true;
             % Set all pins as output in asynchronous bitbang mode
             status = calllib(obj.LibName, 'FT_SetBitMode', obj.handleOut, uint8(0xFF), uint8(0x01));
             if status ~= 0
@@ -76,6 +85,7 @@ classdef TriggerBox < handle
             if status ~= 0
                 error('TriggerBox: could not open input interface (status %d). Make sure ftdi_sio is not loaded.', status);
             end
+            obj.isInOpen = true;
             % Set all pins as input in asynchronous bitbang mode
             status = calllib(obj.LibName, 'FT_SetBitMode', obj.handleIn, uint8(0x00), uint8(0x01));
             if status ~= 0
@@ -150,14 +160,31 @@ classdef TriggerBox < handle
         %% CLEANUP
         
         function delete(obj)
-            % Close both interfaces and unload the library
-            if ~isempty(obj.handleOut)
-                calllib(obj.LibName, 'FT_Close', obj.handleOut);
+            % Close output interface if open
+            try
+                if obj.isOutOpen
+                    calllib(obj.LibName, 'FT_Close', obj.handleOut);
+                end
+            catch
             end
-            if ~isempty(obj.handleIn)
-                calllib(obj.LibName, 'FT_Close', obj.handleIn);
+            
+            % Close input interface if open
+            try
+                if obj.isInOpen
+                    calllib(obj.LibName, 'FT_Close', obj.handleIn);
+                end
+            catch
             end
-            obj.unloadFTDLibrary()
+            
+            % Unload library
+            try
+                if obj.isLibLoaded
+                    unloadlibrary(obj.LibName);
+                end
+            catch
+            end
+            
+            
             fprintf('TriggerBox closed successfully.\n');
         end
         
@@ -165,18 +192,6 @@ classdef TriggerBox < handle
 
     %% Private helpers
     methods (Access=private)
-        function loadFTDLibrary(obj)
-            if ~libisloaded(obj.LibName)
-                loadlibrary(obj.soLibPath, obj.hLibPath);
-            end
-        end
-
-        function unloadFTDLibrary(obj)
-            if libisloaded(obj.LibName)
-                unloadlibrary(obj.LibName);
-            end
-        end
-
         function [idxA, idxB] = getTriggerBoxIndexes(obj)
             % Find device indices for TriggerBox A and TriggerBox B
             numDevs = libpointer('uint32Ptr', 0);
